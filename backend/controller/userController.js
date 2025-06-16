@@ -380,21 +380,27 @@ const userController = {
   },
   getAllUsers: async (req, res) => {
     try {
+      const { userBranch } = req.body;
+      const { role } = req.query;
 
-      let query = {};
-      if (req.query?.role === 'coach') {
-        // console.log(req.query.role);
-        query.role = 'coach';
-        // console.log(query)
+      let roleFilter = {};
+
+      if (role === 'coach') {
+        roleFilter.role = 'coach';
+      } else {
+        // Exclude 'admin' and 'coach'
+        roleFilter.role = { $nin: ['admin', 'coach'] };
       }
 
+      const users = await User.find({
+        userBranch,
+        ...roleFilter,
+      });
 
-      const users = await User.find(query)
-      // console.log(users)
-      res.status(201).json({ message: "Users fetch successfully", users });
+      res.status(200).json({ message: "Users fetched successfully", users });
     } catch (error) {
       console.error("Fetch All Users Error:", error.message);
-      res.status(500).json({ message: "Create Users Error" });
+      res.status(500).json({ message: "Fetch Users Error" });
     }
   },
   updateTrainer: asyncHandler(async (req, res) => {

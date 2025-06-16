@@ -1,4 +1,5 @@
 const AvailTrainer = require('../model/availTrainer');
+const mongoose = require('mongoose');
 const User = require('../model/user')
 const stripe = require('stripe')(process.env.STRIPE_SECRET);
 const { cloudinary, secretKey } = require('../config/cloudinaryConfig')
@@ -85,19 +86,36 @@ exports.createTrainer = async (req, res) => {
     }
 };
 
-// Get all trainers
 exports.getAllTrainers = async (req, res) => {
     try {
-        const trainers = await AvailTrainer.find().populate({
-            path: 'userId',
-            model: 'users'
-        }).populate({
-            path: 'coachID',
-            model: 'users'
-        }).sort({ createdAt: -1 })
-        res.status(200).json(trainers);
+        const { userBranch } = req.body;
+
+        const trainers = await AvailTrainer.find()
+            .populate({
+                path: 'userId',
+                model: 'users',
+                select: 'userBranch', // we only need userBranch here
+            })
+            .populate({
+                path: 'coachID',
+                model: 'users',
+                select: 'userBranch',
+            })
+            .sort({ createdAt: -1 });
+
+        const filtered = trainers.filter(trainer => {
+            const userBranchId1 = trainer.userId?.userBranch?._id || trainer.userId?.userBranch;
+            const userBranchId2 = trainer.coachID?.userBranch?._id || trainer.coachID?.userBranch;
+
+            return (
+                userBranchId1?.toString() === userBranch ||
+                userBranchId2?.toString() === userBranch
+            );
+        });
+
+        res.status(200).json(filtered);
     } catch (error) {
-        console.log(error)
+        console.log(error);
         res.status(500).json({ message: 'Error fetching trainers', error: error.message });
     }
 };
@@ -293,58 +311,123 @@ exports.completeSessionSchedule = async (req, res,) => {
 
 exports.hasActiveTraining = async (req, res) => {
     try {
+        const { userBranch } = req.body;
 
-        const trainer = await AvailTrainer.findOne({ userId: req.params.id, status: 'active' });
-        // console.log("Trainer found:", trainer);
+        const trainers = await AvailTrainer.find({ status: 'active' })
+            .populate({
+                path: 'userId',
+                match: { userBranch },
+            })
+            .populate('coachID');
 
-        if (trainer) {
-            return res.status(200).json({
-                message: 'User has active training',
-                training: trainer,
-                hasActive: true,
-            });
-        }
+        const activeUsers = trainers.filter(trainer => trainer.userId !== null);
 
-        return res.status(404).json({ message: 'User does not have active training', hasActive: false });
+        const result = activeUsers.map(({ userId, coachID, _id, schedule }) => ({
+            user: userId,
+            coach: coachID,
+            trainingId: _id,
+            sessions: schedule || [],
+        }));
+
+        res.status(200).json({
+            message: 'Users with active training fetched successfully',
+            hasActive: result,
+        });
 
     } catch (err) {
-        console.error(err);
+        console.error('Error fetching active training users:', err);
         res.status(500).json({
-            message: 'System failure, please try again later',
-            error: err.message
+            message: 'Failed to fetch users with active training',
+            error: err.message,
         });
     }
-}
+};
+
 
 exports.getSalesStats = async (req, res) => {
     try {
+        const { userBranch, debug } = req.body;
+
         const today = new Date();
-        const startOfDay = new Date(today.setHours(0, 0, 0, 0));
+        const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
         const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
         const startOfYear = new Date(today.getFullYear(), 0, 1);
 
-        const todaySales = await AvailTrainer.aggregate([
-            { $match: { createdAt: { $gte: startOfDay } } },
-            { $group: { _id: null, totalSales: { $sum: "$total" } } }
-        ]);
+        // Helper function to build aggregation pipeline
+        const generateSalesPipeline = (startDate) => {
+            const pipeline = [
+                {
+                    $match: {
+                        createdAt: { $gte: startDate },
+                    },
+                },
+                {
+                    $lookup: {
+                        from: 'users',
+                        localField: 'userId',
+                        foreignField: '_id',
+                        as: 'user',
+                    },
+                },
+                { $unwind: '$user' },
+            ];
 
-        const monthlySales = await AvailTrainer.aggregate([
-            { $match: { createdAt: { $gte: startOfMonth } } },
-            { $group: { _id: null, totalSales: { $sum: "$total" } } }
-        ]);
+            // Apply branch filtering if userBranch is provided
+            if (userBranch) {
+                pipeline.push({
+                    $match: {
+                        'user.userBranch': new mongoose.Types.ObjectId(userBranch),
+                    },
+                });
+            }
 
-        const yearlySales = await AvailTrainer.aggregate([
-            { $match: { createdAt: { $gte: startOfYear } } },
-            { $group: { _id: null, totalSales: { $sum: "$total" } } }
-        ]);
+            // Debug mode: show detailed documents
+            if (debug) {
+                pipeline.push({
+                    $project: {
+                        total: 1,
+                        createdAt: 1,
+                        userName: '$user.name',
+                        userBranch: '$user.userBranch',
+                    },
+                });
+            } else {
+                // Normal mode: group total sales
+                pipeline.push({
+                    $group: {
+                        _id: null,
+                        totalSales: { $sum: '$total' },
+                    },
+                });
+            }
 
-        res.json({
-            todaySales: todaySales[0]?.totalSales || 0,
-            monthlySales: monthlySales[0]?.totalSales || 0,
-            yearlySales: yearlySales[0]?.totalSales || 0,
+            return pipeline;
+        };
+
+        // Run aggregations
+        const todayResults = await AvailTrainer.aggregate(generateSalesPipeline(startOfDay));
+        const monthResults = await AvailTrainer.aggregate(generateSalesPipeline(startOfMonth));
+        const yearResults = await AvailTrainer.aggregate(generateSalesPipeline(startOfYear));
+
+        // Return raw records if debugging
+        if (debug) {
+            return res.status(200).json({
+                message: "Debug mode enabled",
+                todaySalesRecords: todayResults,
+                monthlySalesRecords: monthResults,
+                yearlySalesRecords: yearResults,
+            });
+        }
+
+        // Return summarized sales data
+        return res.status(200).json({
+            todaySales: todayResults[0]?.totalSales || 0,
+            monthlySales: monthResults[0]?.totalSales || 0,
+            yearlySales: yearResults[0]?.totalSales || 0,
         });
+
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: "Failed to fetch sales stats" });
+        console.error("Error fetching sales stats:", error);
+        return res.status(500).json({ error: "Failed to fetch sales stats" });
     }
 };
