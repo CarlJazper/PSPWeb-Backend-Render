@@ -389,7 +389,7 @@ const userController = {
         roleFilter.role = 'coach';
       } else {
         // Exclude 'admin' and 'coach'
-        roleFilter.role = { $nin: ['admin', 'coach'] };
+        roleFilter.role = { $nin: ['superadmin','admin', 'coach'] };
       }
 
       const users = await User.find({
