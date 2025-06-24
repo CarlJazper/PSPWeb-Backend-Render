@@ -5,26 +5,23 @@ const logsController = {
     getAllLogs: async (req, res) => {
         try {
             const { userBranch } = req.body;
+            console.log("Received userBranch:", userBranch);
 
-            const logs = await Logs.find()
+            // Fetch logs and populate the userId
+            const logs = await Logs.find({ adminBranchId: userBranch })
                 .populate({
                     path: "userId",
-                    select: "name image userBranch",
-                })
-                .populate({
-                    path: "adminBranchId",
-                    select: "userBranch",
+                    select: "name image",
                 })
                 .sort({ createdAt: -1 });
 
-            const filteredLogs = logs.filter(log =>
-                log.adminBranchId?.userBranch?.toString() === userBranch
-            );
+            console.log("Filtered logs count:", logs.length);
 
-            res.status(200).json({ message: "Logs fetched successfully", logs: filteredLogs });
+            res.status(200).json({ success: true, logs });
+
         } catch (error) {
-            console.error("Fetch All Logs Error:", error.message);
-            res.status(500).json({ message: "Fetch Logs Error" });
+            console.error("Error in getAllLogs:", error);
+            res.status(500).json({ success: false, message: 'Failed to get logs.' });
         }
     },
 };

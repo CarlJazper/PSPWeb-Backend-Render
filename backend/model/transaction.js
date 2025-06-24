@@ -66,6 +66,11 @@ const transactionSchema = new mongoose.Schema({
         type: String,
         required: true,
     },
+    status: {
+        type: String,
+        enum: ["active", "inactive"],
+        default: 'active',
+    },
     createdAt: {
         type: Date,
         default: Date.now,
@@ -76,9 +81,9 @@ const transactionSchema = new mongoose.Schema({
     },
 });
 
-transactionSchema.pre('save', function(next) {
+transactionSchema.pre('save', function (next) {
     this.updatedAt = Date.now();
     next();
 });
 
-module.exports  = mongoose.model('transaction', transactionSchema);
+module.exports = mongoose.model('transaction', transactionSchema);
