@@ -90,19 +90,25 @@ exports.getAllTrainers = async (req, res) => {
     try {
         const { userBranch } = req.body;
 
-        const trainers = await AvailTrainer.find()
+        const trainers = await AvailTrainer.find({ isDeleted: { $ne: true } }) // ⬅️ optional: filter out deleted
             .populate({
                 path: 'userId',
                 model: 'users',
-                select: 'userBranch', // we only need userBranch here
+                select: 'name userBranch',
             })
             .populate({
                 path: 'coachID',
                 model: 'users',
-                select: 'userBranch',
+                select: 'name userBranch',
             })
             .sort({ createdAt: -1 });
 
+        // ✅ If no userBranch is provided (superadmin), return all trainers
+        if (!userBranch) {
+            return res.status(200).json(trainers);
+        }
+
+        // ✅ Otherwise filter by branch
         const filtered = trainers.filter(trainer => {
             const userBranchId1 = trainer.userId?.userBranch?._id || trainer.userId?.userBranch;
             const userBranchId2 = trainer.coachID?.userBranch?._id || trainer.coachID?.userBranch;
