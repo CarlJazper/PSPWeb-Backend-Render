@@ -15,6 +15,6 @@ router.put('/cancel/session/:id', availTrainerController.cancelSessionSchedule);
 router.put('/complete/session/:id', availTrainerController.completeSessionSchedule);
 router.post('/has-active', availTrainerController.hasActiveTraining);
 router.post('/session-sales', availTrainerController.getSalesStats);
-
+router.post('/training-usage-stats', availTrainerController.getTrainingUsageStats);
 
 module.exports = router;

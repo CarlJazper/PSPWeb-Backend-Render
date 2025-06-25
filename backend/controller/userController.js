@@ -421,22 +421,61 @@ const userController = {
 
 			let roleFilter = {};
 
-			if (role === 'coach') {
-				roleFilter.role = 'coach';
-			} else {
-				// Exclude 'admin' and 'coach'
-				roleFilter.role = { $nin: ['admin', 'coach'] };
+			if (role === "coach") {
+				// ✅ Just fetch coaches
+				roleFilter.role = "coach";
+
+				const coachQuery = { ...roleFilter };
+				if (userBranch) {
+					coachQuery.userBranch = new mongoose.Types.ObjectId(userBranch);
+				}
+
+				const coaches = await User.find(coachQuery);
+
+				return res.status(200).json({
+					message: "Coaches fetched successfully",
+					users: coaches,
+				});
 			}
 
-			const users = await User.find({
-				userBranch,
-				...roleFilter,
-			});
+			// ✅ Filter non-admin, non-coach users
+			roleFilter.role = { $nin: ["superadmin", "admin", "coach"] };
 
-			res.status(200).json({ message: "Users fetched successfully", users });
+			const transactionMatch = {
+				subscriptionExpiration: { $gt: new Date() },
+			};
+			if (userBranch) {
+				transactionMatch.userBranch = userBranch;
+			}
+
+			// ✅ Only get users with valid transactions
+			const activeTransactions = await Transaction.aggregate([
+				{ $match: transactionMatch },
+				{ $group: { _id: "$userId" } },
+			]);
+
+			const activeUserIds = activeTransactions.map((u) => u._id);
+
+			const finalUserQuery = {
+				_id: {
+					$in: activeUserIds.map((id) => new mongoose.Types.ObjectId(id)),
+				},
+				...roleFilter,
+			};
+
+			if (userBranch) {
+				finalUserQuery.userBranch = new mongoose.Types.ObjectId(userBranch);
+			}
+
+			const users = await User.find(finalUserQuery);
+
+			res.status(200).json({
+				message: "Users with active subscriptions fetched successfully",
+				users,
+			});
 		} catch (error) {
-			console.error("Fetch All Users Error:", error.message);
-			res.status(500).json({ message: "Fetch Users Error" });
+			console.error("Fetch Active Users Error:", error.message);
+			res.status(500).json({ message: "Fetch Active Users Error" });
 		}
 	},
 	updateTrainer: asyncHandler(async (req, res) => {

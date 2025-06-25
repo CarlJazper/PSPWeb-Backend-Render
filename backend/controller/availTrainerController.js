@@ -36,7 +36,6 @@ exports.createPaymentIntent = async (req, res) => {
         res.status(500).json({ message: 'Error creating payment intent' });
     }
 };
-
 // Create a new trainer
 exports.createTrainer = async (req, res) => {
     // console.log(req.body)
@@ -85,7 +84,6 @@ exports.createTrainer = async (req, res) => {
         res.status(400).json({ message: 'Error creating trainer', error: error.message });
     }
 };
-
 exports.getAllTrainers = async (req, res) => {
     try {
         const { userBranch } = req.body;
@@ -125,7 +123,6 @@ exports.getAllTrainers = async (req, res) => {
         res.status(500).json({ message: 'Error fetching trainers', error: error.message });
     }
 };
-
 // Get a specific trainer by ID
 exports.getTrainerById = async (req, res) => {
     try {
@@ -144,7 +141,6 @@ exports.getTrainerById = async (req, res) => {
         res.status(500).json({ message: 'Error fetching trainer', error: error.message });
     }
 };
-
 // Update a trainer by ID
 exports.updateTrainer = async (req, res) => {
     try {
@@ -160,7 +156,6 @@ exports.updateTrainer = async (req, res) => {
         res.status(400).json({ message: 'Error updating trainer', error: error.message });
     }
 };
-
 // Delete a trainer by ID
 exports.deleteTrainer = async (req, res) => {
     try {
@@ -173,7 +168,6 @@ exports.deleteTrainer = async (req, res) => {
         res.status(500).json({ message: 'Error deleting trainer', error: error.message });
     }
 };
-
 exports.getByAssignedCoach = async (req, res,) => {
 
     try {
@@ -194,7 +188,6 @@ exports.getByAssignedCoach = async (req, res,) => {
     }
 
 }
-
 exports.getClientsAvailedServices = async (req, res,) => {
 
     try {
@@ -218,7 +211,6 @@ exports.getClientsAvailedServices = async (req, res,) => {
     }
 
 }
-
 exports.updateSessionSchedule = async (req, res,) => {
 
     try {
@@ -250,7 +242,6 @@ exports.updateSessionSchedule = async (req, res,) => {
     }
 
 }
-
 exports.cancelSessionSchedule = async (req, res,) => {
 
     try {
@@ -280,7 +271,6 @@ exports.cancelSessionSchedule = async (req, res,) => {
     }
 
 }
-
 exports.completeSessionSchedule = async (req, res,) => {
 
     try {
@@ -314,7 +304,6 @@ exports.completeSessionSchedule = async (req, res,) => {
     }
 
 }
-
 exports.hasActiveTraining = async (req, res) => {
     try {
         const { userBranch } = req.body;
@@ -348,8 +337,6 @@ exports.hasActiveTraining = async (req, res) => {
         });
     }
 };
-
-
 exports.getSalesStats = async (req, res) => {
     try {
         const { userBranch, debug } = req.body;
@@ -435,5 +422,85 @@ exports.getSalesStats = async (req, res) => {
     } catch (error) {
         console.error("Error fetching sales stats:", error);
         return res.status(500).json({ error: "Failed to fetch sales stats" });
+    }
+};
+
+exports.getTrainingUsageStats = async (req, res) => {
+    try {
+        const { userBranch } = req.body;
+
+        const pipeline = [
+            // Join userId
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'userId',
+                    foreignField: '_id',
+                    as: 'user'
+                }
+            },
+            { $unwind: '$user' },
+
+            // Join coachID
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'coachID',
+                    foreignField: '_id',
+                    as: 'coach'
+                }
+            },
+            {
+                $unwind: {
+                    path: '$coach',
+                    preserveNullAndEmptyArrays: true // coach may be null
+                }
+            },
+
+            //Filter by userBranch
+            ...(userBranch
+                ? [{
+                    $match: {
+                        $or: [
+                            { 'user.userBranch': new mongoose.Types.ObjectId(userBranch) },
+                            { 'coach.userBranch': new mongoose.Types.ObjectId(userBranch) }
+                        ]
+                    }
+                }]
+                : []
+            ),
+
+            // Unwind schedule and trainings
+            { $unwind: '$schedule' },
+            { $unwind: '$schedule.trainings' },
+
+            // Count trainings
+            {
+                $group: {
+                    _id: '$schedule.trainings',
+                    count: { $sum: 1 }
+                }
+            },
+            { $sort: { count: -1 } }
+        ];
+
+        const trainingStats = await AvailTrainer.aggregate(pipeline);
+
+        if (trainingStats.length === 0) {
+            return res.status(404).json({ message: "No trainings found" });
+        }
+
+        const mostUsed = trainingStats[0];
+        const leastUsed = trainingStats[trainingStats.length - 1];
+
+        res.status(200).json({
+            message: "Training usage statistics fetched successfully",
+            mostUsed,
+            leastUsed,
+            allStats: trainingStats,
+        });
+    } catch (error) {
+        console.error("Error fetching training usage stats:", error);
+        res.status(500).json({ message: "Failed to fetch training usage stats", error: error.message });
     }
 };
