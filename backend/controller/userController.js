@@ -512,41 +512,56 @@ register: asyncHandler(async (req, res) => {
 				.json({ success: false, message: "Update Trainer Server Error" });
 		}
 	}),
-	deleteUser: asyncHandler(async (req, res) => {
-		try {
-			const { id } = req.params;
+deleteUser: asyncHandler(async (req, res) => {
+	try {
+		const { id } = req.params;
 
-			// Find the user
-			const user = await User.findById(id);
-			if (!user) {
-				return res
-					.status(404)
-					.json({ success: false, message: "User not found" });
-			}
-
-			// Delete user's image from Cloudinary if it exists
-			if (user.image && user.image.public_id) {
-				await cloudinary.uploader.destroy(user.image.public_id);
-			}
-
-			// Delete user's Stripe customer if they have one
-			if (user.stripeCustomerId) {
-				await stripe.customers.del(user.stripeCustomerId);
-			}
-
-			// Delete user from database
-			await User.findByIdAndDelete(id);
-
+		// Find the user
+		const user = await User.findById(id);
+		if (!user) {
 			return res
-				.status(200)
-				.json({ success: true, message: "User deleted successfully" });
-		} catch (error) {
-			console.error("Delete User Error:", error);
-			return res
-				.status(500)
-				.json({ success: false, message: "Error deleting user" });
+				.status(404)
+				.json({ success: false, message: "User not found" });
 		}
-	}),
+
+		// Delete user's image from Cloudinary if it exists
+		if (user.image && user.image.public_id) {
+			await cloudinary.uploader.destroy(user.image.public_id);
+		}
+
+		// Delete user's Stripe customer if they have one
+		if (user.stripeCustomerId) {
+			try {
+				await stripe.customers.del(user.stripeCustomerId);
+			} catch (err) {
+				// Ignore "resource_missing" error (customer not found)
+				if (err.code === "resource_missing") {
+					console.warn(`Stripe customer ${user.stripeCustomerId} not found or already deleted.`);
+				} else {
+					console.error("Stripe deletion error:", err);
+					return res.status(500).json({
+						success: false,
+						message: "Error deleting Stripe customer",
+						error: err.message,
+					});
+				}
+			}
+		}
+
+		// Delete user from database
+		await User.findByIdAndDelete(id);
+
+		return res
+			.status(200)
+			.json({ success: true, message: "User deleted successfully" });
+	} catch (error) {
+		console.error("Delete User Error:", error);
+		return res
+			.status(500)
+			.json({ success: false, message: "Error deleting user" });
+	}
+}),
+
 	getCoachRatings: asyncHandler(async (req, res) => {
 		const { id } = req.params;
 
