@@ -260,24 +260,31 @@ const userController = {
 	updateUser: asyncHandler(async (req, res) => {
 		try {
 			const { _id, name, email, role } = req.body;
-			let user = await User.findById({ _id: _id });
+			let user = await User.findById(_id);
 
-			const imageUrl = req.file.path;
+			if (!user) {
+				return res
+					.status(404)
+					.json({ success: false, message: "User not found" });
+			}
 
-			// const resultDelete = await cloudinary.v2.uploader.destroy(user.image[0].public_id);
+			// Only upload a new image if provided
+			if (req.file) {
+				const imageUrl = req.file.path;
 
-			const result = await cloudinary.uploader.upload(imageUrl, {
-				folder: "PSPCloudinaryData/users",
-				width: 150,
-				crop: "scale",
-			});
+				const result = await cloudinary.uploader.upload(imageUrl, {
+					folder: "PSPCloudinaryData/users",
+					width: 150,
+					crop: "scale",
+				});
 
+				user.image = { public_id: result.public_id, url: result.secure_url };
+			}
+
+			// Update other fields
 			user.name = name;
 			user.email = email;
 			user.role = role;
-			user.image = { public_id: result.public_id, url: result.secure_url };
-
-			// console.log(user)
 
 			user = await User.findByIdAndUpdate(_id, user, {
 				new: true,
