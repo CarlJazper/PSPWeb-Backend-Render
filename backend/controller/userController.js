@@ -14,182 +14,171 @@ const accesscard = process.env.STRIPE_ACCESSCARD;
 
 const userController = {
 	//!Register
-	register: asyncHandler(async (req, res) => {
-		try {
-			const {
-				email,
-				password,
-				name,
-				birthDate,
-				address,
-				city,
-				role,
-				phone,
-				emergencyContactName,
-				emergencyContactNumber,
-			} = req.body;
+register: asyncHandler(async (req, res) => {
+  try {
+    const {
+      email,
+      password,
+      name,
+      birthDate,
+      address,
+      city,
+      role,
+      phone,
+      emergencyContactName,
+      emergencyContactNumber,
+      priceId,
+      accesscard,
+    } = req.body;
 
-			const userBranch = req.body.userBranch ? req.body.userBranch : null;
+    const userBranch = req.body.userBranch ? req.body.userBranch : null;
 
-			// Validation
-			if (!email || !password) {
-				throw new Error("Please all fields are required");
-			}
+    if (!email || !password) {
+      throw new Error("Please fill in all required fields");
+    }
 
-			// Check if user exists
-			const userExists = await User.findOne({ email });
-			if (userExists) {
-				throw new Error("User already exists");
-			}
+    const userExists = await User.findOne({ email });
+    if (userExists) {
+      throw new Error("User already exists");
+    }
 
-			// Hash the password
-			const salt = await bcrypt.genSalt(10);
-			const hashedPassword = await bcrypt.hash(password, salt);
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
 
-			// Check if file was uploaded
-			if (!req.file) {
-				return res.status(400).json({ message: "No file uploaded" });
-			}
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
 
-			// Upload image to Cloudinary
-			const result = await cloudinary.uploader.upload(req.file.path, {
-				folder: "PSPCloudinaryData/users",
-				width: 150,
-				crop: "scale",
-			});
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      folder: "PSPCloudinaryData/users",
+      width: 150,
+      crop: "scale",
+    });
 
-			// Create a Stripe customer
-			const stripeCustomer = await stripe.customers.create({
-				name: name,
-				email: email,
-			});
+    const stripeCustomer = await stripe.customers.create({
+      name,
+      email,
+    });
 
-			// If the role is "coach", save the user without additional processing
-			if (role === "coach") {
-				// console.log('Here Coach!!')
-				let user = new User({
-					name,
-					email,
-					userBranch,
-					birthDate,
-					role,
-					address,
-					city,
-					phone,
-					generalAccess: "PSPCard",
-					otherAccess: "Any Valid ID",
-					emergencyContactName,
-					emergencyContactNumber,
-					password: hashedPassword,
-					image: { public_id: result.public_id, url: result.secure_url },
-				});
+    if (role === "coach") {
+      let user = new User({
+        name,
+        email,
+        userBranch,
+        birthDate,
+        role,
+        address,
+        city,
+        phone,
+        generalAccess: "PSPCard",
+        otherAccess: "Any Valid ID",
+        emergencyContactName,
+        emergencyContactNumber,
+        password: hashedPassword,
+        image: { public_id: result.public_id, url: result.secure_url },
+      });
 
-				// Save user to the database
-				user = await user.save();
+      user = await user.save();
 
-				return res.status(201).json({
-					success: true,
-					message: "Coach Registered Successfully",
-					user,
-				});
-			} else {
-				// Set subscription dates
-				const subscribedDate = new Date();
-				const subscriptionExpiration = new Date();
-				subscriptionExpiration.setFullYear(subscribedDate.getFullYear() + 1);
+      return res.status(201).json({
+        success: true,
+        message: "Coach Registered Successfully",
+        user,
+      });
+    } else {
+      const subscribedDate = new Date();
+      const subscriptionExpiration = new Date();
+      subscriptionExpiration.setFullYear(subscribedDate.getFullYear() + 1);
 
-				// Create new user with the Cloudinary URL and Stripe customer ID
-				let user = new User({
-					name,
-					email,
-					userBranch,
-					birthDate,
-					role: "client",
-					address,
-					city,
-					phone,
-					generalAccess: "PSPCard",
-					otherAccess: "Any Valid ID",
-					subscribedDate,
-					subscriptionExpiration,
-					emergencyContactName,
-					emergencyContactNumber,
-					password: hashedPassword,
-					image: { public_id: result.public_id, url: result.secure_url },
-					stripeCustomerId: stripeCustomer.id,
-				});
+      let user = new User({
+        name,
+        email,
+        userBranch,
+        birthDate,
+        role: "client",
+        address,
+        city,
+        phone,
+        generalAccess: "PSPCard",
+        otherAccess: "Any Valid ID",
+        subscribedDate,
+        subscriptionExpiration,
+        emergencyContactName,
+        emergencyContactNumber,
+        password: hashedPassword,
+        image: { public_id: result.public_id, url: result.secure_url },
+        stripeCustomerId: stripeCustomer.id,
+      });
 
-				// Save user to the database
-				user = await user.save();
+      user = await user.save();
 
-				// Retrieve base price and access card price
-				const basePrice = await stripe.prices.retrieve(priceId);
-				const accessCard = await stripe.prices.retrieve(accesscard);
-				let finalAmount = basePrice.unit_amount + accessCard.unit_amount;
-				finalAmount = finalAmount / 100;
-				let items = [{ price: priceId }];
-				const promo = "";
+      // Stripe logic only if online payment
+      if (priceId && accesscard) {
+        const basePrice = await stripe.prices.retrieve(priceId);
+        const accessCard = await stripe.prices.retrieve(accesscard);
 
-				if (promo === "") {
-					const finalAmount = basePrice.unit_amount + accessCard.unit_amount;
-					items = [
-						{
-							price_data: {
-								currency: "php",
-								product: basePrice.product,
-								unit_amount: finalAmount,
-								recurring: {
-									interval: "year",
-								},
-							},
-						},
-					];
-				}
-				const subscription = await stripe.subscriptions.create({
-					customer: stripeCustomer.id,
-					items,
-					payment_behavior: "default_incomplete",
-					expand: ["latest_invoice.payment_intent"],
-				});
+        let finalAmount = basePrice.unit_amount + accessCard.unit_amount;
+        finalAmount = finalAmount / 100;
 
-				const stripeSubscriptionId = subscription.id;
+        const items = [
+          {
+            price_data: {
+              currency: "php",
+              product: basePrice.product,
+              unit_amount: basePrice.unit_amount + accessCard.unit_amount,
+              recurring: {
+                interval: "year",
+              },
+            },
+          },
+        ];
 
-				let transaction = new Transaction({
-					transactionType: "Membership Subscription",
-					userId: user._id,
-					userBranch,
-					birthDate,
-					address,
-					city,
-					phone,
-					emergencyContactName,
-					emergencyContactNumber,
-					promo: "",
-					agreeTerms: true,
-					subscribedDate,
-					subscriptionExpiration,
-					stripeSubscriptionId,
-					amount: finalAmount,
-				});
+        const subscription = await stripe.subscriptions.create({
+          customer: stripeCustomer.id,
+          items,
+          payment_behavior: "default_incomplete",
+          expand: ["latest_invoice.payment_intent"],
+        });
 
-				transaction = await transaction.save();
+        const stripeSubscriptionId = subscription.id;
 
-				return res.status(201).json({
-					success: true,
-					message: "Client Registered Successfully",
-					user,
-				});
-				// console.log("Here goes too!")
-			}
-		} catch (error) {
-			console.log(error);
-			res.status(500).json({
-				success: false,
-				message: "Error in Register API",
-				error: error.message,
-			});
-		}
-	}),
+        const transaction = new Transaction({
+          transactionType: "Membership Subscription",
+          userId: user._id,
+          userBranch,
+          birthDate,
+          address,
+          city,
+          phone,
+          emergencyContactName,
+          emergencyContactNumber,
+          promo: "",
+          agreeTerms: true,
+          subscribedDate,
+          subscriptionExpiration,
+          stripeSubscriptionId,
+          amount: finalAmount,
+        });
+
+        await transaction.save();
+      }
+
+      return res.status(201).json({
+        success: true,
+        message: "Client Registered Successfully",
+        user,
+      });
+    }
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({
+      success: false,
+      message: "Error in Register API",
+      error: error.message,
+    });
+  }
+}),
+
 	//!Login
 	login: asyncHandler(async (req, res) => {
 		try {
