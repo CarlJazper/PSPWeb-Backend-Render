@@ -19,5 +19,6 @@ router.put('/update-trainer/:id', upload.single('image'), userController.updateT
 router.delete('/user-delete/:id', userController.deleteUser);
 router.get('/get-ratings/:id', userController.getCoachRatings);
 router.get('/coach-clients', userController.getCoachClients);
+router.post("/age-demographics", userController.getAgeDemographics);
 
 module.exports = router;
