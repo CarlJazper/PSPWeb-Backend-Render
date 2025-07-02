@@ -14,171 +14,170 @@ const accesscard = process.env.STRIPE_ACCESSCARD;
 
 const userController = {
 	//!Register
-register: asyncHandler(async (req, res) => {
-  try {
-    const {
-      email,
-      password,
-      name,
-      birthDate,
-      address,
-      city,
-      role,
-      phone,
-      emergencyContactName,
-      emergencyContactNumber,
-      priceId,
-      accesscard,
-    } = req.body;
+	register: asyncHandler(async (req, res) => {
+		try {
+			const {
+				email,
+				password,
+				name,
+				birthDate,
+				address,
+				city,
+				role,
+				phone,
+				emergencyContactName,
+				emergencyContactNumber,
+				priceId,
+				accesscard,
+			} = req.body;
 
-    const userBranch = req.body.userBranch ? req.body.userBranch : null;
+			const userBranch = req.body.userBranch ? req.body.userBranch : null;
 
-    if (!email || !password) {
-      throw new Error("Please fill in all required fields");
-    }
+			if (!email || !password) {
+				throw new Error("Please fill in all required fields");
+			}
 
-    const userExists = await User.findOne({ email });
-    if (userExists) {
-      throw new Error("User already exists");
-    }
+			const userExists = await User.findOne({ email });
+			if (userExists) {
+				throw new Error("User already exists");
+			}
 
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+			const salt = await bcrypt.genSalt(10);
+			const hashedPassword = await bcrypt.hash(password, salt);
 
-    if (!req.file) {
-      return res.status(400).json({ message: "No file uploaded" });
-    }
+			if (!req.file) {
+				return res.status(400).json({ message: "No file uploaded" });
+			}
 
-    const result = await cloudinary.uploader.upload(req.file.path, {
-      folder: "PSPCloudinaryData/users",
-      width: 150,
-      crop: "scale",
-    });
+			const result = await cloudinary.uploader.upload(req.file.path, {
+				folder: "PSPCloudinaryData/users",
+				width: 150,
+				crop: "scale",
+			});
 
-    const stripeCustomer = await stripe.customers.create({
-      name,
-      email,
-    });
+			const stripeCustomer = await stripe.customers.create({
+				name,
+				email,
+			});
 
-    if (role === "coach") {
-      let user = new User({
-        name,
-        email,
-        userBranch,
-        birthDate,
-        role,
-        address,
-        city,
-        phone,
-        generalAccess: "PSPCard",
-        otherAccess: "Any Valid ID",
-        emergencyContactName,
-        emergencyContactNumber,
-        password: hashedPassword,
-        image: { public_id: result.public_id, url: result.secure_url },
-      });
+			if (role === "coach") {
+				let user = new User({
+					name,
+					email,
+					userBranch,
+					birthDate,
+					role,
+					address,
+					city,
+					phone,
+					generalAccess: "PSPCard",
+					otherAccess: "Any Valid ID",
+					emergencyContactName,
+					emergencyContactNumber,
+					password: hashedPassword,
+					image: { public_id: result.public_id, url: result.secure_url },
+				});
 
-      user = await user.save();
+				user = await user.save();
 
-      return res.status(201).json({
-        success: true,
-        message: "Coach Registered Successfully",
-        user,
-      });
-    } else {
-      const subscribedDate = new Date();
-      const subscriptionExpiration = new Date();
-      subscriptionExpiration.setFullYear(subscribedDate.getFullYear() + 1);
+				return res.status(201).json({
+					success: true,
+					message: "Coach Registered Successfully",
+					user,
+				});
+			} else {
+				const subscribedDate = new Date();
+				const subscriptionExpiration = new Date();
+				subscriptionExpiration.setFullYear(subscribedDate.getFullYear() + 1);
 
-      let user = new User({
-        name,
-        email,
-        userBranch,
-        birthDate,
-        role: "client",
-        address,
-        city,
-        phone,
-        generalAccess: "PSPCard",
-        otherAccess: "Any Valid ID",
-        subscribedDate,
-        subscriptionExpiration,
-        emergencyContactName,
-        emergencyContactNumber,
-        password: hashedPassword,
-        image: { public_id: result.public_id, url: result.secure_url },
-        stripeCustomerId: stripeCustomer.id,
-      });
+				let user = new User({
+					name,
+					email,
+					userBranch,
+					birthDate,
+					role: "client",
+					address,
+					city,
+					phone,
+					generalAccess: "PSPCard",
+					otherAccess: "Any Valid ID",
+					subscribedDate,
+					subscriptionExpiration,
+					emergencyContactName,
+					emergencyContactNumber,
+					password: hashedPassword,
+					image: { public_id: result.public_id, url: result.secure_url },
+					stripeCustomerId: stripeCustomer.id,
+				});
 
-      user = await user.save();
+				user = await user.save();
 
-      // Stripe logic only if online payment
-      if (priceId && accesscard) {
-        const basePrice = await stripe.prices.retrieve(priceId);
-        const accessCard = await stripe.prices.retrieve(accesscard);
+				// Stripe logic only if online payment
+				if (priceId && accesscard) {
+					const basePrice = await stripe.prices.retrieve(priceId);
+					const accessCard = await stripe.prices.retrieve(accesscard);
 
-        let finalAmount = basePrice.unit_amount + accessCard.unit_amount;
-        finalAmount = finalAmount / 100;
+					let finalAmount = basePrice.unit_amount + accessCard.unit_amount;
+					finalAmount = finalAmount / 100;
 
-        const items = [
-          {
-            price_data: {
-              currency: "php",
-              product: basePrice.product,
-              unit_amount: basePrice.unit_amount + accessCard.unit_amount,
-              recurring: {
-                interval: "year",
-              },
-            },
-          },
-        ];
+					const items = [
+						{
+							price_data: {
+								currency: "php",
+								product: basePrice.product,
+								unit_amount: basePrice.unit_amount + accessCard.unit_amount,
+								recurring: {
+									interval: "year",
+								},
+							},
+						},
+					];
 
-        const subscription = await stripe.subscriptions.create({
-          customer: stripeCustomer.id,
-          items,
-          payment_behavior: "default_incomplete",
-          expand: ["latest_invoice.payment_intent"],
-        });
+					const subscription = await stripe.subscriptions.create({
+						customer: stripeCustomer.id,
+						items,
+						payment_behavior: "default_incomplete",
+						expand: ["latest_invoice.payment_intent"],
+					});
 
-        const stripeSubscriptionId = subscription.id;
+					const stripeSubscriptionId = subscription.id;
 
-        const transaction = new Transaction({
-          transactionType: "Membership Subscription",
-          userId: user._id,
-          userBranch,
-          birthDate,
-          address,
-          city,
-          phone,
-          emergencyContactName,
-          emergencyContactNumber,
-          promo: "",
-          agreeTerms: true,
-          subscribedDate,
-          subscriptionExpiration,
-          stripeSubscriptionId,
-          amount: finalAmount,
-        });
+					const transaction = new Transaction({
+						transactionType: "Membership Subscription",
+						userId: user._id,
+						userBranch,
+						birthDate,
+						address,
+						city,
+						phone,
+						emergencyContactName,
+						emergencyContactNumber,
+						promo: "",
+						agreeTerms: true,
+						subscribedDate,
+						subscriptionExpiration,
+						stripeSubscriptionId,
+						amount: finalAmount,
+					});
 
-        await transaction.save();
-      }
+					await transaction.save();
+				}
 
-      return res.status(201).json({
-        success: true,
-        message: "Client Registered Successfully",
-        user,
-      });
-    }
-  } catch (error) {
-    console.log(error);
-    res.status(500).json({
-      success: false,
-      message: "Error in Register API",
-      error: error.message,
-    });
-  }
-}),
-
+				return res.status(201).json({
+					success: true,
+					message: "Client Registered Successfully",
+					user,
+				});
+			}
+		} catch (error) {
+			console.log(error);
+			res.status(500).json({
+				success: false,
+				message: "Error in Register API",
+				error: error.message,
+			});
+		}
+	}),
 	//!Login
 	login: asyncHandler(async (req, res) => {
 		try {
@@ -512,56 +511,57 @@ register: asyncHandler(async (req, res) => {
 				.json({ success: false, message: "Update Trainer Server Error" });
 		}
 	}),
-deleteUser: asyncHandler(async (req, res) => {
-	try {
-		const { id } = req.params;
+	deleteUser: asyncHandler(async (req, res) => {
+		try {
+			const { id } = req.params;
 
-		// Find the user
-		const user = await User.findById(id);
-		if (!user) {
-			return res
-				.status(404)
-				.json({ success: false, message: "User not found" });
-		}
+			// Find the user
+			const user = await User.findById(id);
+			if (!user) {
+				return res
+					.status(404)
+					.json({ success: false, message: "User not found" });
+			}
 
-		// Delete user's image from Cloudinary if it exists
-		if (user.image && user.image.public_id) {
-			await cloudinary.uploader.destroy(user.image.public_id);
-		}
+			// Delete user's image from Cloudinary if it exists
+			if (user.image && user.image.public_id) {
+				await cloudinary.uploader.destroy(user.image.public_id);
+			}
 
-		// Delete user's Stripe customer if they have one
-		if (user.stripeCustomerId) {
-			try {
-				await stripe.customers.del(user.stripeCustomerId);
-			} catch (err) {
-				// Ignore "resource_missing" error (customer not found)
-				if (err.code === "resource_missing") {
-					console.warn(`Stripe customer ${user.stripeCustomerId} not found or already deleted.`);
-				} else {
-					console.error("Stripe deletion error:", err);
-					return res.status(500).json({
-						success: false,
-						message: "Error deleting Stripe customer",
-						error: err.message,
-					});
+			// Delete user's Stripe customer if they have one
+			if (user.stripeCustomerId) {
+				try {
+					await stripe.customers.del(user.stripeCustomerId);
+				} catch (err) {
+					// Ignore "resource_missing" error (customer not found)
+					if (err.code === "resource_missing") {
+						console.warn(
+							`Stripe customer ${user.stripeCustomerId} not found or already deleted.`
+						);
+					} else {
+						console.error("Stripe deletion error:", err);
+						return res.status(500).json({
+							success: false,
+							message: "Error deleting Stripe customer",
+							error: err.message,
+						});
+					}
 				}
 			}
+
+			// Delete user from database
+			await User.findByIdAndDelete(id);
+
+			return res
+				.status(200)
+				.json({ success: true, message: "User deleted successfully" });
+		} catch (error) {
+			console.error("Delete User Error:", error);
+			return res
+				.status(500)
+				.json({ success: false, message: "Error deleting user" });
 		}
-
-		// Delete user from database
-		await User.findByIdAndDelete(id);
-
-		return res
-			.status(200)
-			.json({ success: true, message: "User deleted successfully" });
-	} catch (error) {
-		console.error("Delete User Error:", error);
-		return res
-			.status(500)
-			.json({ success: false, message: "Error deleting user" });
-	}
-}),
-
+	}),
 	getCoachRatings: asyncHandler(async (req, res) => {
 		const { id } = req.params;
 
