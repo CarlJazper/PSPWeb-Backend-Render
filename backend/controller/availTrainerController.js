@@ -424,7 +424,6 @@ exports.getSalesStats = async (req, res) => {
         return res.status(500).json({ error: "Failed to fetch sales stats" });
     }
 };
-
 exports.getTrainingUsageStats = async (req, res) => {
     try {
         const { userBranch } = req.body;
@@ -502,5 +501,59 @@ exports.getTrainingUsageStats = async (req, res) => {
     } catch (error) {
         console.error("Error fetching training usage stats:", error);
         res.status(500).json({ message: "Failed to fetch training usage stats", error: error.message });
+    }
+};
+exports.getTrainingTypeStats = async (req, res) => {
+    try {
+        const { userBranch } = req.body;
+
+       const pipeline = [
+            {
+                $lookup: {
+                    from: "users",
+                    localField: "userId",
+                    foreignField: "_id",
+                    as: "user",
+                },
+            },
+            { $unwind: "$user" },
+            ...(userBranch
+                ? [
+                    {
+                        $match: {
+                            "user.userBranch": new mongoose.Types.ObjectId(userBranch),
+                        },
+                    },
+                ]
+                : []),
+
+            {
+                $match: {
+                    trainingType: { $exists: true, $ne: "" },
+                },
+            },
+            {
+                $group: {
+                    _id: "$trainingType",
+                    count: { $sum: 1 },
+                },
+            },
+            { $sort: { count: -1 } },
+        ];
+
+        const typeStats = await AvailTrainer.aggregate(pipeline);
+
+        if (!typeStats || typeStats.length === 0) {
+            return res.status(404).json({ message: "No training type data found" });
+        }
+
+        res.status(200).json({
+            message: "Training type statistics fetched successfully",
+            typeStats
+        });
+
+    } catch (error) {
+        console.error("Error fetching training type stats:", error);
+        res.status(500).json({ message: "Failed to fetch training type stats", error: error.message });
     }
 };

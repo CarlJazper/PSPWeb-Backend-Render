@@ -20,5 +20,6 @@ router.delete('/user-delete/:id', userController.deleteUser);
 router.get('/get-ratings/:id', userController.getCoachRatings);
 router.get('/coach-clients', userController.getCoachClients);
 router.post("/age-demographics", userController.getAgeDemographics);
+router.get('/by-age-group', userController.getUsersByAgeRange);
 
 module.exports = router;

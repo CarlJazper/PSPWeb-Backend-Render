@@ -16,5 +16,7 @@ router.put('/complete/session/:id', availTrainerController.completeSessionSchedu
 router.post('/has-active', availTrainerController.hasActiveTraining);
 router.post('/session-sales', availTrainerController.getSalesStats);
 router.post('/training-usage-stats', availTrainerController.getTrainingUsageStats);
+router.post('/training-type-stats', availTrainerController.getTrainingTypeStats);
+
 
 module.exports = router;

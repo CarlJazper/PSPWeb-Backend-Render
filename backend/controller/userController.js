@@ -463,10 +463,21 @@ const userController = {
 			}
 
 			const users = await User.find(finalUserQuery);
+			const usersWithAge = users.map((user) => {
+				const birthDate = new Date(user.birthDate);
+				const ageDifMs = Date.now() - birthDate.getTime();
+				const ageDate = new Date(ageDifMs); // miliseconds from epoch
+				const age = Math.abs(ageDate.getUTCFullYear() - 1970);
+
+				return {
+					...user.toObject(),
+					age,
+				};
+			});
 
 			res.status(200).json({
 				message: "Users with active subscriptions fetched successfully",
-				users,
+				users: usersWithAge,
 			});
 		} catch (error) {
 			console.error("Fetch Active Users Error:", error.message);
@@ -615,47 +626,74 @@ const userController = {
 		}
 	}),
 	getAgeDemographics: asyncHandler(async (req, res) => {
-    try {
-        const { userBranch } = req.body;
+		try {
+			const { userBranch } = req.body;
 
-        // Age groups
-        const ageBuckets = [
-            { label: "18-25", min: 18, max: 25 },
-            { label: "26-35", min: 26, max: 35 },
-            { label: "36-45", min: 36, max: 45 },
-            { label: "46-60", min: 46, max: 60 },
-            { label: "60+", min: 61, max: 120 },
-        ];
+			// Age groups
+			const ageBuckets = [
+				{ label: "18-25", min: 18, max: 25 },
+				{ label: "26-35", min: 26, max: 35 },
+				{ label: "36-45", min: 36, max: 45 },
+				{ label: "46-60", min: 46, max: 60 },
+				{ label: "60+", min: 61, max: 120 },
+			];
 
-        const match = { birthDate: { $ne: null } };
-        if (userBranch) {
-            match.userBranch = new mongoose.Types.ObjectId(userBranch);
-        }
+			const match = { birthDate: { $ne: null } };
+			if (userBranch) {
+				match.userBranch = new mongoose.Types.ObjectId(userBranch);
+			}
 
-        const users = await User.find(match, "birthDate");
+			const users = await User.find(match, "birthDate");
 
-        const now = new Date();
-        const ageGroups = {};
+			const now = new Date();
+			const ageGroups = {};
 
-        for (const bucket of ageBuckets) {
-            ageGroups[bucket.label] = 0;
-        }
+			for (const bucket of ageBuckets) {
+				ageGroups[bucket.label] = 0;
+			}
 
-        users.forEach((user) => {
-            const age = Math.floor((now - new Date(user.birthDate)) / (365.25 * 24 * 60 * 60 * 1000));
-            for (const bucket of ageBuckets) {
-                if (age >= bucket.min && age <= bucket.max) {
-                    ageGroups[bucket.label]++;
-                    break;
-                }
-            }
-        });
+			users.forEach((user) => {
+				const age = Math.floor(
+					(now - new Date(user.birthDate)) / (365.25 * 24 * 60 * 60 * 1000)
+				);
+				for (const bucket of ageBuckets) {
+					if (age >= bucket.min && age <= bucket.max) {
+						ageGroups[bucket.label]++;
+						break;
+					}
+				}
+			});
 
-        return res.status(200).json({ ageGroups });
-    } catch (error) {
-        console.error("Error fetching age demographics:", error.message);
-        res.status(500).json({ message: "Error fetching age demographics" });
-    }
-}),
+			return res.status(200).json({ ageGroups });
+		} catch (error) {
+			console.error("Error fetching age demographics:", error.message);
+			res.status(500).json({ message: "Error fetching age demographics" });
+		}
+	}),
+	getUsersByAgeRange: asyncHandler(async (req, res) => {
+		const { min, max, branch } = req.query;
+
+		const match = {
+			birthDate: { $ne: null },
+			role: { $nin: ["admin", "coach", "superadmin"] },
+		};
+
+		if (branch) {
+			match.userBranch = new mongoose.Types.ObjectId(branch);
+		}
+
+		const now = new Date();
+
+		const users = await User.find(match);
+
+		const filtered = users.filter((user) => {
+			const age = Math.floor(
+				(now - new Date(user.birthDate)) / (365.25 * 24 * 60 * 60 * 1000)
+			);
+			return age >= Number(min) && age <= Number(max);
+		});
+
+		res.status(200).json({ users: filtered });
+	}),
 };
 module.exports = userController;
