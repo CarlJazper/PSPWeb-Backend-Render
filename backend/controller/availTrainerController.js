@@ -557,3 +557,115 @@ exports.getTrainingTypeStats = async (req, res) => {
         res.status(500).json({ message: "Failed to fetch training type stats", error: error.message });
     }
 };
+exports.trainingDemographics = async (req, res) => {
+    try {
+        const { userBranch } = req.body;
+
+        const pipeline = [
+            {
+                $lookup: {
+                    from: "users",
+                    localField: "userId",
+                    foreignField: "_id",
+                    as: "user"
+                }
+            },
+            { $unwind: "$user" },
+            ...(userBranch
+                ? [{
+                    $match: {
+                        "user.userBranch": new mongoose.Types.ObjectId(userBranch)
+                    }
+                }]
+                : []),
+            {
+                $match: {
+                    "user.gender": { $in: ["male", "female"] },
+                    "user.birthDate": { $ne: null },
+                    trainingType: { $exists: true, $ne: "" }
+                }
+            },
+            {
+                $project: {
+                    trainingType: 1,
+                    name: "$user.name",
+                    gender: "$user.gender",
+                    birthDate: "$user.birthDate"
+                }
+            },
+            {
+                $group: {
+                    _id: "$trainingType",
+                    users: {
+                        $push: {
+                            name: "$name",
+                            gender: "$gender",
+                            birthDate: "$birthDate"
+                        }
+                    }
+                }
+            }
+        ];
+
+        const rawStats = await AvailTrainer.aggregate(pipeline);
+
+        const TRAINING_TYPES = ['Health', 'Shape', 'Sports', 'Strength'];
+        const now = new Date();
+
+        const result = TRAINING_TYPES.map(type => {
+            const stat = rawStats.find(item => item._id === type);
+            if (!stat) {
+                return {
+                    trainingType: type,
+                    topGender: "N/A",
+                    genderCount: 0,
+                    averageAgeBracket: "N/A",
+                    users: []
+                };
+            }
+
+            // Gender count
+            const genderCountMap = {};
+            const usersWithAge = stat.users.map(u => {
+                const age = Math.floor((now - new Date(u.birthDate)) / (365.25 * 24 * 60 * 60 * 1000));
+                genderCountMap[u.gender] = (genderCountMap[u.gender] || 0) + 1;
+                return {
+                    name: u.name,
+                    gender: u.gender,
+                    age
+                };
+            });
+
+            const sortedGenders = Object.entries(genderCountMap).sort((a, b) => b[1] - a[1]);
+            const topGender = sortedGenders.length > 0 ? sortedGenders[0][0] : "N/A";
+            const genderCount = sortedGenders.length > 0 ? sortedGenders[0][1] : 0;
+
+            // Age bracket
+            const avgAge = usersWithAge.length
+                ? Math.floor(usersWithAge.reduce((sum, u) => sum + u.age, 0) / usersWithAge.length)
+                : null;
+
+            let bracket = "N/A";
+            if (avgAge !== null) {
+                if (avgAge <= 25) bracket = "18-25";
+                else if (avgAge <= 35) bracket = "26-35";
+                else if (avgAge <= 45) bracket = "36-45";
+                else if (avgAge <= 60) bracket = "46-60";
+                else bracket = "60+";
+            }
+
+            return {
+                trainingType: type,
+                topGender,
+                genderCount,
+                averageAgeBracket: bracket,
+                users: usersWithAge
+            };
+        });
+
+        res.status(200).json({ trainingDemographics: result });
+    } catch (error) {
+        console.error("Error fetching training demographics:", error);
+        res.status(500).json({ message: "Failed to fetch training demographics", error: error.message });
+    }
+};
