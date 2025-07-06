@@ -619,16 +619,20 @@ exports.trainingDemographics = async (req, res) => {
                     trainingType: type,
                     topGender: "N/A",
                     genderCount: 0,
+                    male: 0,
+                    female: 0,
                     averageAgeBracket: "N/A",
                     users: []
                 };
             }
 
-            // Gender count
-            const genderCountMap = {};
+            let male = 0;
+            let female = 0;
+
             const usersWithAge = stat.users.map(u => {
                 const age = Math.floor((now - new Date(u.birthDate)) / (365.25 * 24 * 60 * 60 * 1000));
-                genderCountMap[u.gender] = (genderCountMap[u.gender] || 0) + 1;
+                if (u.gender === "male") male++;
+                if (u.gender === "female") female++;
                 return {
                     name: u.name,
                     gender: u.gender,
@@ -636,9 +640,10 @@ exports.trainingDemographics = async (req, res) => {
                 };
             });
 
-            const sortedGenders = Object.entries(genderCountMap).sort((a, b) => b[1] - a[1]);
-            const topGender = sortedGenders.length > 0 ? sortedGenders[0][0] : "N/A";
-            const genderCount = sortedGenders.length > 0 ? sortedGenders[0][1] : 0;
+            const topGender = male === 0 && female === 0
+                ? "N/A"
+                : male >= female ? "male" : "female";
+            const genderCount = Math.max(male, female);
 
             // Age bracket
             const avgAge = usersWithAge.length
@@ -658,6 +663,8 @@ exports.trainingDemographics = async (req, res) => {
                 trainingType: type,
                 topGender,
                 genderCount,
+                male,
+                female,
                 averageAgeBracket: bracket,
                 users: usersWithAge
             };
